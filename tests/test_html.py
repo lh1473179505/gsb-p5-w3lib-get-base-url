@@ -523,16 +523,75 @@ class TestGetBaseUrl:
             == "https://example.org"
         )
 
-    @pytest.mark.xfail(
-        reason="the tag scan stops at a raw < or > inside a quoted attribute value",
-        strict=True,
-    )
-    @pytest.mark.parametrize("quote", ["<", ">"])
-    def test_lt_gt_in_quoted_attribute_value(self, quote: str) -> None:
-        assert (
-            get_base_url(f'<base data-x="a{quote}b" href="http://example.org/">')
-            == "http://example.org/"
+    @pytest.mark.parametrize("bracket", ["<", ">"])
+    @pytest.mark.parametrize("quot", ['"', "'"])
+    @pytest.mark.parametrize("href_first", [False, True])
+    def test_lt_gt_in_quoted_attribute_value(
+        self, bracket: str, quot: str, href_first: bool
+    ) -> None:
+        attrs = f"data-x={quot}a{bracket}b{quot} href={quot}http://example.org/{quot}"
+        if href_first:
+            attrs = f"href={quot}http://example.org/{quot} data-x={quot}a{bracket}b{quot}"
+        text = f"<base {attrs}>"
+        expected = "http://example.org/"
+        assert get_base_url(text) == expected
+        # the bytes fast path and the decoded scan must agree
+        assert get_base_url(text.encode("utf-8"), encoding="utf-8") == expected
+
+    @pytest.mark.parametrize("quot", ['"', "'"])
+    def test_fake_base_in_comment_and_script_then_real(self, quot: str) -> None:
+        baseurl = "http://example.org/app/"
+        text = (
+            "<!-- <base href=http://evil/> -->"
+            "<script>var t = '<base href=http://evil/>';</script>"
+            "<noscript><base href='http://evil/'></noscript>"
+            f'<base data-x={quot}a>b{quot} data-y={quot}c<d{quot} '
+            f'href={quot}/real/{quot}>'
         )
+        expected = "http://example.org/real/"
+        assert get_base_url(text, baseurl) == expected
+        assert (
+            get_base_url(text.encode("utf-8"), baseurl, encoding="utf-8")
+            == expected
+        )
+
+    def test_quoted_attribute_bytes_str_equivalence_utf16(self) -> None:
+        # a non-ASCII-compatible encoding must not crash and agree with str
+        baseurl = "http://example.org/app/"
+        text = (
+            "<script>var t = '<base href=http://evil/>';</script>"
+            '<base data-x="a>b" href="/real/">'
+        )
+        expected = get_base_url(text, baseurl, encoding="utf-16")
+        assert expected.startswith("http://example.org/real/")
+        assert "evil" not in expected
+        assert (
+            get_base_url(text.encode("utf-16"), baseurl, encoding="utf-16")
+            == expected
+        )
+
+    def test_href_value_shapes_survive_quoted_attr_fix(self) -> None:
+        baseurl = "http://example.org/app/"
+        # absolute, root-relative and whitespace-padded values, href first or
+        # last, with another quoted attribute carrying < and >
+        cases = [
+            ('<base data-x="a>b" href="http://example.org/abs/">',
+             "http://example.org/abs/"),
+            ('<base data-x="a>b" href="/root/">',
+             "http://example.org/root/"),
+            ('<base data-x="a<b" href="  /root/  ">',
+             "http://example.org/root/"),
+            ("<base href='rel/path/' data-x='a>b'>",
+             "http://example.org/app/rel/path/"),
+            ('<BASE DATA-X="a>b" HREF="/root/">',
+             "http://example.org/root/"),
+        ]
+        for text, expected in cases:
+            assert get_base_url(text, baseurl) == expected
+            assert (
+                get_base_url(text.encode("utf-8"), baseurl, encoding="utf-8")
+                == expected
+            )
 
     def test_get_base_url_no_catastrophic_backtracking(self):
         prefix = "<base " * 30000
@@ -541,6 +600,16 @@ class TestGetBaseUrl:
         assert (
             get_base_url(
                 prefix + '<base href="http://example.org/found/">',
+                "http://example.com/",
+            )
+            == "http://example.org/found/"
+        )
+        # quote runs that pair across <base prefixes must stay linear too
+        quoted_prefix = """<base data-x=" """ * 30000
+        assert get_base_url(quoted_prefix, "http://example.com/") == "http://example.com/"
+        assert (
+            get_base_url(
+                quoted_prefix + '<base href="http://example.org/found/">',
                 "http://example.com/",
             )
             == "http://example.org/found/"

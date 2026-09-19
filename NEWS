@@ -1,6 +1,16 @@
 w3lib release notes
 ===================
 
+(unreleased)
+------------
+
+-   :func:`~w3lib.html.get_base_url` now scans ``<base>`` tags quote-aware:
+    a raw ``<`` or ``>`` inside a quoted attribute value (e.g.
+    ``<base data-x="a>b" href="/real/">``) no longer truncates the tag and
+    hides its ``href``. Fake ``<base>`` markups inside HTML comments and
+    ``<script>``/``<noscript>`` content are still ignored, and the scan
+    remains linear-time.
+
 2.4.1 (2026-03-20)
 ------------------
 

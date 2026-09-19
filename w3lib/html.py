@@ -38,12 +38,15 @@ _base_bytes_re = re.compile(rb"<base", re.IGNORECASE)
 # the document, as a browser does. Their content is consumed in runs of
 # characters that cannot start the closing delimiter, so that the large inline
 # scripts of real pages cost a tight loop per run rather than a match attempt
-# per character.
+# per character. The <base> attributes are captured quote-aware, so a raw <
+# or > inside a quoted attribute value does not truncate the tag; the
+# repeated group has nothing after it to backtrack into, keeping the scan
+# linear.
 _base_scan_re = re.compile(
     r"""
       <!--[^-]*(?:-(?!->)[^-]*)*(?:-->|$)
     | <(?P<t>script|noscript)\b[^<>]*>[^<]*(?:<(?!/(?P=t)>)[^<]*)*(?:</(?P=t)>|$)
-    | <base\s[^<>]*href\s*=\s*["']\s*(?P<url>[^"'\s]+)\s*["']
+    | <base\s(?P<attrs>(?:[^<>"']+|"[^"]*"|'[^']*')*)
     """,
     re.IGNORECASE | re.DOTALL | re.VERBOSE | re.ASCII,
 )
@@ -444,10 +447,14 @@ def get_base_url(
     utext = to_unicode(text, encoding)
     if _base_re.search(utext):
         for m in _base_scan_re.finditer(utext):
-            if url := m.group("url"):
-                return urljoin(
-                    safe_url_string(baseurl), safe_url_string(url, encoding=encoding)
-                )
+            attrs = m.group("attrs")
+            if attrs is None:
+                continue
+            for name, value in iter_tag_attributes(attrs):
+                if name == "href" and (url := value.strip(HTML5_WHITESPACE)):
+                    return urljoin(
+                        safe_url_string(baseurl), safe_url_string(url, encoding=encoding)
+                    )
     return safe_url_string(baseurl)
 
 

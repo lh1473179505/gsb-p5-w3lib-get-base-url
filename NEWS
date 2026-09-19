@@ -1,6 +1,13 @@
 w3lib release notes
 ===================
 
+Unreleased
+----------
+
+- Fixed :func:`~w3lib.html.get_base_url` to keep scanning a ``<base>`` tag
+  when a quoted attribute value contains ``<`` or ``>``, while still ignoring
+  base declarations in comments and script-like elements in linear time.
+
 2.4.1 (2026-03-20)
 ------------------
 

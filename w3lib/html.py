@@ -31,6 +31,7 @@ _tag_re = re.compile(r"<[a-zA-Z\/!][^<>]*>")
 # same markup.
 _base_re = re.compile("<base", re.IGNORECASE | re.ASCII)
 _base_bytes_re = re.compile(rb"<base", re.IGNORECASE)
+_quoted_attrs = r"""(?:[^<>"']|"[^"]*"|'[^']*')*"""
 # Scan for the first honored <base href>, consuming comments and
 # <script>/<noscript> content (where a browser never parses tags) along the
 # way. Ignorable regions come first in the alternation, so a <base> inside one
@@ -38,12 +39,13 @@ _base_bytes_re = re.compile(rb"<base", re.IGNORECASE)
 # the document, as a browser does. Their content is consumed in runs of
 # characters that cannot start the closing delimiter, so that the large inline
 # scripts of real pages cost a tight loop per run rather than a match attempt
-# per character.
+# per character. Tag attributes are consumed as ordinary characters or whole
+# quoted values, so a < or > inside quotes does not end the tag.
 _base_scan_re = re.compile(
-    r"""
+    rf"""
       <!--[^-]*(?:-(?!->)[^-]*)*(?:-->|$)
-    | <(?P<t>script|noscript)\b[^<>]*>[^<]*(?:<(?!/(?P=t)>)[^<]*)*(?:</(?P=t)>|$)
-    | <base\s[^<>]*href\s*=\s*["']\s*(?P<url>[^"'\s]+)\s*["']
+    | <(?P<t>script|noscript)\b{_quoted_attrs}>[^<]*(?:<(?!/(?P=t)>)[^<]*)*(?:</(?P=t)>|$)
+    | <base\s{_quoted_attrs}?href\s*=\s*["']\s*(?P<url>[^"'\s]+)\s*["']
     """,
     re.IGNORECASE | re.DOTALL | re.VERBOSE | re.ASCII,
 )

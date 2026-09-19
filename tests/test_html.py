@@ -523,16 +523,68 @@ class TestGetBaseUrl:
             == "https://example.org"
         )
 
-    @pytest.mark.xfail(
-        reason="the tag scan stops at a raw < or > inside a quoted attribute value",
-        strict=True,
-    )
     @pytest.mark.parametrize("quote", ["<", ">"])
-    def test_lt_gt_in_quoted_attribute_value(self, quote: str) -> None:
+    @pytest.mark.parametrize("attr_quote", ["'", '"'])
+    def test_lt_gt_in_quoted_attribute_value(
+        self, quote: str, attr_quote: str
+    ) -> None:
         assert (
-            get_base_url(f'<base data-x="a{quote}b" href="http://example.org/">')
+            get_base_url(
+                f"<base data-x={attr_quote}a{quote}b{attr_quote} "
+                f"href={attr_quote}http://example.org/{attr_quote}>"
+            )
             == "http://example.org/"
         )
+
+    @pytest.mark.parametrize("quote", ["<", ">"])
+    @pytest.mark.parametrize("attr_quote", ["'", '"'])
+    def test_fake_base_does_not_beat_real_base(
+        self, quote: str, attr_quote: str
+    ) -> None:
+        baseurl = "http://example.org/app/"
+        text = (
+            '<!-- <base href="http://evil.example/comment/"> -->'
+            '<script data-x="1>2">const fake = '
+            '"<base href=\'http://evil.example/script/\'>";'
+            "</script>"
+            f"<base data-x={attr_quote}a{quote}b{attr_quote} "
+            f"href={attr_quote}/real/{attr_quote}>"
+        )
+
+        assert get_base_url(text, baseurl) == "http://example.org/real/"
+        assert (
+            get_base_url(text.encode("ascii"), baseurl)
+            == "http://example.org/real/"
+        )
+
+    def test_get_base_url_bytes_fast_negative(self) -> None:
+        baseurl = "http://example.org/app/"
+        text = '<p data-x="a>b">No base tag here.</p>'
+
+        assert get_base_url(text, baseurl) == baseurl
+        assert get_base_url(text.encode("ascii"), baseurl) == baseurl
+
+    @pytest.mark.parametrize(
+        ("tag", "expected"),
+        [
+            (
+                '<base href="http://example.net/real/" data-x="a>b">',
+                "http://example.net/real/",
+            ),
+            (
+                '<base data-x="a>b" href="/real/">',
+                "http://example.org/real/",
+            ),
+            (
+                "<base href=' /real/ ' data-x='a<b'>",
+                "http://example.org/real/",
+            ),
+        ],
+    )
+    def test_href_forms_and_attribute_order(self, tag: str, expected: str) -> None:
+        baseurl = "http://example.org/app/"
+        assert get_base_url(tag, baseurl) == expected
+        assert get_base_url(tag.encode("ascii"), baseurl) == expected
 
     def test_get_base_url_no_catastrophic_backtracking(self):
         prefix = "<base " * 30000
@@ -540,7 +592,7 @@ class TestGetBaseUrl:
         assert get_base_url(prefix, "http://example.com/") == "http://example.com/"
         assert (
             get_base_url(
-                prefix + '<base href="http://example.org/found/">',
+                prefix + '<base data-x="a>b" href="http://example.org/found/">',
                 "http://example.com/",
             )
             == "http://example.org/found/"
